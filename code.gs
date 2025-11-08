@@ -749,10 +749,11 @@ function webGetAllSubordinateEmails(managerEmail) {
                     allSubordinates.add(reportEmail);
                     // If the report is a manager, add them to the queue to find their reports
                     if (userData.emailToRole[reportEmail] !== 'agent') {
-                push(reportEmail);
+                        queue.push(reportEmail); // <-- FIX: Was 'push(reportEmail)'
                     }
                 }
-            });
+            
+        });
         }
         
         // Return all subordinates *plus* the manager
