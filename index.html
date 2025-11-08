@@ -1250,6 +1250,57 @@
         background-color: #3c4043;
       }
 
+      /* [START] MODIFICATION: CSS for Coaching Admin */
+.template-category-block {
+  background-color: var(--page-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 15px;
+  margin-bottom: 20px;
+  position: relative;
+}
+.template-category-block input {
+  background-color: var(--card-bg);
+}
+.template-criteria-container {
+  padding-left: 20px;
+  border-left: 2px solid var(--konecta-blue);
+  margin-top: 15px;
+}
+.template-criteria-item {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+  align-items: center;
+}
+.template-criteria-item input {
+  flex: 1;
+}
+.template-criteria-item .remove-btn, .remove-category-btn {
+  padding: 8px 12px;
+  font-size: 1rem;
+  min-width: 40px;
+  margin: 0;
+  background-color: #ea4335;
+  box-shadow: none;
+  font-weight: 700;
+  line-height: 1;
+}
+.remove-category-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background-color: transparent;
+  color: #ea4335;
+  font-size: 1.2rem;
+}
+.remove-category-btn:hover {
+  background-color: var(--status-leave);
+}
+/* [END] MODIFICATION */
+
+
+
       /* --- Responsive Design --- */
       @media (max-width: 900px) {
         /* Dashboard grid defaults to 1 column due to minmax(350px) but we explicitly set it for clarity */
@@ -1355,6 +1406,7 @@
         <button id="admin-tools-tab-button" class="tab-button" onclick="showTab('admin-tools')">Admin Tools</button>
         <button id="reporting-line-tab-button" class="tab-button" onclick="showTab('reporting-line')">Reporting Line</button>
         <button id="coaching-tab-button" class="tab-button" onclick="showTab('coaching')">Coaching</button>
+        <button id="coaching-admin-tab-button" class="tab-button" onclick="showTab('coaching-admin')" style="display: none;">Coaching Admin</button>
       </div>
 
       <div class="content-container">
@@ -1689,6 +1741,29 @@
               <p class="text-color-secondary">Your coaching history will appear here.</p>
             </div>
           </div>
+          <!-- ================================== -->
+          <!--      TAB 11: coaching admin PANEL            -->
+          <!-- ================================== -->
+          <div id="coaching-admin-panel" class="tab-panel" style="display:none;">
+          <form id="template-create-form" class="form-container">
+            <h2>Create New Coaching Template</h2>
+            <p class="text-color-secondary">Create a new template. Add categories and criteria below. All fields are required.</p>
+            
+            <div class="form-group">
+              <label for="template-name">Template Name</label>
+              <input type="text" id="template-name" placeholder="e.g., 'Q1 Sales Template'" required>
+            </div>
+            
+            <div id="template-categories-container">
+              </div>
+            
+            <button type="button" class="view-btn" onclick="addTemplateCategory()" style="background-color:var(--konecta-blue); margin: 10px 0;">+ Add Category</button>
+            <hr class="section-divider">
+            <button type="button" class="submit-btn-green" onclick="saveNewTemplate()">Save New Template</button>
+          </form>
+          <div id="coaching-admin-status" class="status-message"></div>
+        </div>
+
 
         </div>
 
@@ -1931,7 +2006,8 @@
           document.getElementById('schedule-tab-button').style.display = 'inline-block';
           document.getElementById('leave-approval-tab-button').style.display = 'inline-block';
           document.getElementById('admin-tools-tab-button').style.display = 'inline-block'; 
-          document.getElementById('history-report-tab-button').style.display = 'inline-block'; 
+          document.getElementById('history-report-tab-button').style.display = 'inline-block';
+          document.getElementById('coaching-admin-tab-button').style.display = 'inline-block'; 
           
           // Show custom select container for history
           document.getElementById('history-user-select-container').style.display = 'block'; 
@@ -3927,6 +4003,7 @@
         }
       }
       
+      
 
       // --- NEW: Coaching Detail Modal Functions ---
 
@@ -4224,6 +4301,117 @@
 
 
       // --- END Coaching Functions ---
+
+      // [START] MODIFICATION 6: Add JS for Coaching Admin Tab
+
+      let categoryCounter = 0;
+
+      function addTemplateCategory() {
+        categoryCounter++;
+        const container = document.getElementById('template-categories-container');
+        const newCategory = document.createElement('div');
+        newCategory.className = 'template-category-block';
+        newCategory.id = 'category-' + categoryCounter;
+        newCategory.innerHTML = `
+          <button type.="button" class="remove-category-btn" onclick="removeTemplateItem('category-${categoryCounter}')" title="Remove Category">&times;</button>
+          <div class="form-group">
+            <label for="category-name-${categoryCounter}">Category Name</label>
+            <input type="text" id="category-name-${categoryCounter}" class="category-name-input" placeholder="e.g., 'Opening'">
+          </div>
+          <div class="template-criteria-container" id="criteria-container-${categoryCounter}">
+            </div>
+          <button type="button" class="view-btn" onclick="addTemplateCriteria(${categoryCounter})" style="background-color: var(--text-color-secondary); margin-top: 15px; padding: 8px 15px; font-size: 0.9rem;">+ Add Criteria</button>
+        `;
+        container.appendChild(newCategory);
+      }
+
+      function addTemplateCriteria(categoryIndex) {
+        const container = document.getElementById('criteria-container-' + categoryIndex);
+        const criteriaItem = document.createElement('div');
+        criteriaItem.className = 'template-criteria-item';
+        criteriaItem.innerHTML = `
+          <input type="text" class="criteria-name-input" placeholder="e.g., 'Agent greeted customer'">
+          <button type="button" class="remove-btn" onclick="removeTemplateItem(this.parentElement)">-</button>
+        `;
+        container.appendChild(criteriaItem);
+      }
+
+      function removeTemplateItem(elementOrId) {
+        let elementToRemove;
+        if (typeof elementOrId === 'string') {
+          elementToRemove = document.getElementById(elementOrId);
+        } else {
+          elementToRemove = elementOrId;
+        }
+        if (elementToRemove) {
+          elementToRemove.remove();
+        }
+      }
+
+      function saveNewTemplate() {
+        try {
+          const templateName = document.getElementById('template-name').value.trim();
+          if (!templateName) {
+            throw new Error("Template Name is required.");
+          }
+          
+          const categories = [];
+          const categoryBlocks = document.querySelectorAll('.template-category-block');
+          
+          if (categoryBlocks.length === 0) {
+            throw new Error("You must add at least one category.");
+          }
+
+          categoryBlocks.forEach(block => {
+            const categoryName = block.querySelector('.category-name-input').value.trim();
+            if (!categoryName) {
+              throw new Error("All Category Names are required.");
+            }
+            
+            const criteria = [];
+            const criteriaInputs = block.querySelectorAll('.criteria-name-input');
+            
+            if (criteriaInputs.length === 0) {
+              throw new Error(`Category '${categoryName}' must have at least one criterion.`);
+            }
+            
+            criteriaInputs.forEach(input => {
+              const criteriaName = input.value.trim();
+              if (!criteriaName) {
+                throw new Error("All Criteria fields are required.");
+              }
+              criteria.push(criteriaName);
+            });
+            
+            categories.push({ name: categoryName, criteria: criteria });
+          });
+          
+          setStatus('coaching-admin-status', 'processing', `Saving template '${templateName}'...`);
+          
+          google.script.run
+            .withSuccessHandler(msg => {
+              if (msg.startsWith('Error:')) { 
+                setStatus('coaching-admin-status', 'error', msg.replace('Error: ', ''));
+              } else {
+                setStatus('coaching-admin-status', 'success', msg);
+                // Reset form
+                document.getElementById('template-create-form').reset();
+                document.getElementById('template-categories-container').innerHTML = '';
+                categoryCounter = 0;
+                // Reload the template list in the *other* tab
+                loadTemplateList();
+              }
+            })
+            .withFailureHandler(err => {
+              setStatus('coaching-admin-status', 'error', err.message);
+            })
+            .webSaveNewTemplate(templateName, categories);
+
+        } catch (err) {
+          setStatus('coaching-admin-status', 'error', err.message);
+        }
+      }
+// [END] MODIFICATION 6
 
 
       // Initialize
