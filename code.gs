@@ -594,6 +594,74 @@ function webGetTemplateCriteria(templateName) {
 // === NEW/REPLACED COACHING FUNCTIONS (END) ===
 // ==========================================================
 
+// [START] MODIFICATION 8: Add webSaveNewTemplate function
+/**
+ * NEW: Saves a new coaching template from the admin tab.
+ */
+function webSaveNewTemplate(templateName, categories) {
+  try {
+    const adminEmail = Session.getActiveUser().getEmail().toLowerCase();
+    const ss = getSpreadsheet();
+    
+    // Check permission
+    const dbSheet = getOrCreateSheet(ss, SHEET_NAMES.database);
+    const userData = getUserDataFromDb(dbSheet);
+    const adminRole = userData.emailToRole[adminEmail] || 'agent';
+
+    if (adminRole !== 'admin' && adminRole !== 'superadmin') {
+      throw new Error("Permission denied. Only managers can create templates.");
+    }
+    
+    // Validation
+    if (!templateName) {
+      throw new Error("Template Name is required.");
+    }
+    if (!categories || categories.length === 0) {
+      throw new Error("At least one category is required.");
+    }
+
+    const templateSheet = getOrCreateSheet(ss, SHEET_NAMES.coachingTemplates);
+    
+    // Check if template name already exists
+    const templateNames = templateSheet.getRange(2, 1, templateSheet.getLastRow() - 1, 1).getValues();
+    const
+      lowerTemplateName = templateName.toLowerCase();
+    for (let i = 0; i < templateNames.length; i++) {
+      if (templateNames[i][0] && templateNames[i][0].toLowerCase() === lowerTemplateName) {
+        throw new Error(`A template with the name '${templateName}' already exists.`);
+      }
+    }
+
+    const rowsToAppend = [];
+    categories.forEach(category => {
+      if (category.criteria && category.criteria.length > 0) {
+        category.criteria.forEach(criterion => {
+          rowsToAppend.push([
+            templateName,
+            category.name,
+            criterion,
+            'Active' // Default to Active
+          ]);
+        });
+      }
+    });
+
+    if (rowsToAppend.length === 0) {
+      throw new Error("No criteria were found to save.");
+    }
+    
+    // Write all new rows at once
+    templateSheet.getRange(templateSheet.getLastRow() + 1, 1, rowsToAppend.length, 4).setValues(rowsToAppend);
+    
+    SpreadsheetApp.flush();
+    return `Template '${templateName}' saved successfully with ${rowsToAppend.length} criteria.`;
+
+  } catch (err) {
+    Logger.log("webSaveNewTemplate Error: " + err.message);
+    return "Error: " + err.message;
+  }
+}
+// [END] MODIFICATION 8
 
 // === NEW: Web App API for Manager Hierarchy ===
 function webGetManagerHierarchy() {
