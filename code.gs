@@ -9,7 +9,8 @@ const SHEET_NAMES = {
   leaveRequests: "Leave Requests", 
   coaching_OLD: "Coaching", // Renamed old sheet
   coachingSessions: "CoachingSessions", // NEW
-  coachingScores: "CoachingScores" // NEW
+  coachingScores: "CoachingScores", // NEW
+  coachingTemplates: "CoachingTemplates" // <-- *** ADD THIS LINE ***
 };
 // --- Break Time Configuration (in seconds) ---
 const PLANNED_BREAK_SECONDS = 15 * 60; // 15 minutes
@@ -1334,8 +1335,9 @@ function getOrCreateSheet(ss, name) {
       sheet.getRange("A1:D1").setValues([[
         "TemplateName", "Category", "Criteria", "Status"
       ]]);
-      // Add a note and a default template
-      sheet.getRange("F1").setValue("Manually add your template criteria here. Use 'Active' in the Status column to make them appear.");
+      // Add a note
+      sheet.getRange("F1").setValue("Manually add your template criteria here, or use the 'Coaching Admin' tab. Use 'Active' in the Status column to make them appear.");
+    
       sheet.appendRow(["Default", "Greeting", "Agent greeted customer", "Active"]);
       sheet.appendRow(["Default", "Greeting", "Agent confirmed name", "Active"]);
       sheet.appendRow(["Default", "Sales Process", "Agent offered solution", "Active"]);
@@ -1508,10 +1510,13 @@ function getMyRequests(userEmail) {
           totalDays: row[7],
           reason: row[8],
           requestedDate: convertDateToString(new Date(requestedDateNum)),
-          supervisorName: userData.emailToName[supervisorEmail] || supervisorEmail 
+          supervisorName: userData.emailToName[supervisorEmail] || supervisorEmail,
+          actionDate: convertDateToString(new Date(row[9])), // ActionDate
+          actionBy: userData.emailToName[row[10]] || row[10] // ActionBy
         });
       } catch (e) {
         Logger.log(`CRITICAL ERROR processing row ${i+1} for getMyRequests. Error: ${e.message}`);
+        Logger.log(`getMyRequests for ${userEmail}: Found ${myRequests.length} total requests.`);
       }
     }
   }
@@ -2012,12 +2017,12 @@ function importScheduleCSV(adminEmail, csvData) {
   return `Import successful. Records Created: ${daysCreated}, Records Updated: ${daysUpdated}.`;
 }
 
-// MODIFIED: Logic updated to handle 'ALL_USERS' and load team data if needed.
+// [START] MODIFICATION 13: Replace getDashboardData
+// MODIFIED: Logic completely updated to return individual agent statuses.
 function getDashboardData(adminEmail, userEmails, date) {
   const ss = getSpreadsheet();
   const dbSheet = getOrCreateSheet(ss, SHEET_NAMES.database);
   const userData = getUserDataFromDb(dbSheet);
-  
   const adminRole = userData.emailToRole[adminEmail] || 'agent';
   if (adminRole !== 'admin' && adminRole !== 'superadmin') {
     throw new Error("Permission denied.");
@@ -2029,22 +2034,12 @@ function getDashboardData(adminEmail, userEmails, date) {
   const targetDate = new Date(date);
   const targetDateStr = Utilities.formatDate(targetDate, timeZone, "MM/dd/yyyy");
   
-  // --- UPDATED: Filter by selected users ---
-  let targetUserEmails = userEmails;
+  // --- Use the target user list ---
+  const targetUserSet = new Set(userEmails.map(e => e.toLowerCase()));
+  
+  // --- NEW: Map to store individual statuses ---
+  const userStatusMap = {}; // Key: email, Value: "Status String"
 
-  // Use the specific list provided by the custom dropdown
-  const targetUserSet = new Set(targetUserEmails);
-  // --- END UPDATED FILTER ---
-  
-  const statusMap = {
-    "Logged In": 0,
-    "On Break/Other": 0,
-    "On Leave": 0,
-    "Absent": 0,
-    "Pending Login": 0,
-    "Logged Out": 0
-  };
-  
   const totalAdherenceMetrics = {
     totalTardy: 0,
     totalEarlyLeave: 0,
@@ -2052,11 +2047,12 @@ function getDashboardData(adminEmail, userEmails, date) {
     totalBreakExceed: 0,
     totalLunchExceed: 0
   };
-  
   // Individual metrics
   const userMetricsMap = {}; 
-  targetUserEmails.forEach(email => {
-    const name = userData.emailToName[email] || email;
+  userEmails.forEach(email => {
+    const lEmail = email.toLowerCase();
+    const name = userData.emailToName[lEmail] || lEmail;
+    userStatusMap[lEmail] = "Not Scheduled"; // Default status
     userMetricsMap[name] = {
       name: name,
       tardy: 0,
@@ -2068,10 +2064,11 @@ function getDashboardData(adminEmail, userEmails, date) {
   });
   // ---
 
+  const usersScheduledToday = new Set(); // Still needed for adherence logic
+
   // 1. Get Today's Schedule
   const scheduleSheet = getOrCreateSheet(ss, SHEET_NAMES.schedule);
   const scheduleData = scheduleSheet.getDataRange().getValues();
-  const usersScheduledToday = new Set();
   
   for (let i = 1; i < scheduleData.length; i++) {
     const row = scheduleData[i];
@@ -2079,20 +2076,23 @@ function getDashboardData(adminEmail, userEmails, date) {
     
     // FILTER: Only check users in our target set
     if (!targetUserSet.has(schEmail)) continue;
-    
+    
     const schDate = new Date(row[1]);
     const schDateStr = Utilities.formatDate(schDate, timeZone, "MM/dd/yyyy");
-    
+    
     if (schDateStr === targetDateStr) { // Use targetDateStr
       const leaveType = (row[4] || "Present").toLowerCase();
-      
+      
+      // *** NEW STATUS LOGIC ***
       if (leaveType === "present") {
         usersScheduledToday.add(schEmail);
+        userStatusMap[schEmail] = "Pending Login"; // Set default for "Present"
       } else if (leaveType === "absent") {
-        statusMap["Absent"]++;
+        userStatusMap[schEmail] = "Absent";
       } else {
-        statusMap["On Leave"]++;
+        userStatusMap[schEmail] = "On Leave"; // Group all other leave types
       }
+      // *** END NEW STATUS LOGIC ***
     }
   }
   
@@ -2110,15 +2110,13 @@ function getDashboardData(adminEmail, userEmails, date) {
     const rowDate = new Date(row[0]);
     const rowShiftDate = getShiftDate(rowDate, SHIFT_CUTOFF_HOUR);
     const rowDateStr = Utilities.formatDate(rowShiftDate, timeZone, "MM/dd/yyyy");
-    
     if (rowDateStr === targetDateStr) {
       const userName = row[1];
       const userEmail = userData.nameToEmail[userName];
-      
       if (userEmail && targetUserSet.has(userEmail.toLowerCase())) {
-        if (!userLastOtherCode[userEmail]) { // Only get the *last* punch
+        if (!userLastOtherCode[userEmail.toLowerCase()]) { // Only get the *last* punch
           const [code, type] = (row[2] || "").split(" ");
-          userLastOtherCode[userEmail] = {
+          userLastOtherCode[userEmail.toLowerCase()] = {
             code: code,
             type: type
           };
@@ -2132,16 +2130,16 @@ function getDashboardData(adminEmail, userEmails, date) {
     const row = adherenceData[i];
     const rowDate = new Date(row[0]);
     const rowDateStr = Utilities.formatDate(rowDate, timeZone, "MM/dd/yyyy");
-    
     if (rowDateStr === targetDateStr) { // Use targetDateStr
       const userName = row[1];
       const userEmail = userData.nameToEmail[userName];
-      
+      
       // FILTER: Only check users in our target set
       if (userEmail && targetUserSet.has(userEmail.toLowerCase())) {
-        
+        const lEmail = userEmail.toLowerCase();
+        
         // If user is in the "Present" set
-        if (usersScheduledToday.has(userEmail.toLowerCase())) {
+        if (usersScheduledToday.has(lEmail)) {
           const login = row[2];
           const b1_in = row[3];
           const b1_out = row[4];
@@ -2152,30 +2150,27 @@ function getDashboardData(adminEmail, userEmails, date) {
           const logout = row[9];
           
           // --- UPDATED: Real-time Status Logic ---
-          let agentStatus = "Pending Login";
+          let agentStatus = "Pending Login"; 
           if (login && !logout) {
-            agentStatus = "Logged In"; // Default logged-in state
+            agentStatus = "Logged In"; 
             
             // Check Other Codes first
-            const lastOther = userLastOtherCode[userEmail.toLowerCase()];
+            const lastOther = userLastOtherCode[lEmail];
             if (lastOther && lastOther.type === 'In') {
-              agentStatus = "On Break/Other"; // Combined status
+              agentStatus = "On Break/Other"; 
             } else {
               // If not in Other Code, check breaks
               if (b1_in && !b1_out) agentStatus = "On Break/Other";
-               if (l_in && !l_out) agentStatus = "On Break/Other";
+              if (l_in && !l_out) agentStatus = "On Break/Other";
               if (b2_in && !b2_out) agentStatus = "On Break/Other";
-            }
+          }
           } else if (login && logout) {
             agentStatus = "Logged Out";
           }
           // --- END UPDATED ---
           
-          if (statusMap[agentStatus] !== undefined) {
-            statusMap[agentStatus]++;
-          }
-          
-          usersScheduledToday.delete(userEmail.toLowerCase());
+          userStatusMap[lEmail] = agentStatus; // *** SET INDIVIDUAL STATUS ***
+          usersScheduledToday.delete(lEmail); // User is accounted for
         }
         
         // 3. Sum Adherence Metrics
@@ -2190,7 +2185,7 @@ function getDashboardData(adminEmail, userEmails, date) {
         totalAdherenceMetrics.totalOvertime += overtime;
         totalAdherenceMetrics.totalBreakExceed += breakExceed;
         totalAdherenceMetrics.totalLunchExceed += lunchExceed;
-        
+        
         // Add to individual user
         if (userMetricsMap[userName]) {
           userMetricsMap[userName].tardy += tardy;
@@ -2203,19 +2198,15 @@ function getDashboardData(adminEmail, userEmails, date) {
     }
   }
   
-  // Any users left in this set are scheduled but have no adherence row
-  statusMap["Pending Login"] += usersScheduledToday.size;
-  
+  // Any users left in usersScheduledToday are "Pending Login", which is already set.
+  
   // 4. Get Pending Leave Requests
   const reqSheet = getOrCreateSheet(ss, SHEET_NAMES.leaveRequests);
   const reqData = reqSheet.getDataRange().getValues();
   const pendingRequests = [];
-  
   for (let i = 1; i < reqData.length; i++) {
     const row = reqData[i];
-    // FILTER: Check if this request is from a user in our target set
    const reqEmail = (row[2] || "").toLowerCase();
-    
     if (row[1] && row[1].toString().trim().toLowerCase() === 'pending' && targetUserSet.has(reqEmail)) {
       try {
         pendingRequests.push({
@@ -2230,16 +2221,23 @@ function getDashboardData(adminEmail, userEmails, date) {
     }
   }
   
-  // Format status counts for Google Charts
-  const statusCounts = Object.keys(statusMap).map(key => [key, statusMap[key]]);
-  
+  // --- NEW: Format individual agent statuses ---
+  const agentStatusList = [];
+  for (const email of targetUserSet) {
+      const name = userData.emailToName[email] || email;
+      const status = userStatusMap[email] || "Not Scheduled";
+      agentStatusList.push({ name: name, status: status });
+  }
+  agentStatusList.sort((a, b) => a.name.localeCompare(b.name));
+  // --- END NEW ---
+
   // Format individual metrics
   const individualAdherenceMetrics = Object.values(userMetricsMap);
   
   return {
-    statusCounts: statusCounts,
-    totalAdherenceMetrics: totalAdherenceMetrics, // Renamed for clarity
-   individualAdherenceMetrics: individualAdherenceMetrics, // NEW
+    agentStatusList: agentStatusList, // *** MODIFIED ***
+    totalAdherenceMetrics: totalAdherenceMetrics,
+   individualAdherenceMetrics: individualAdherenceMetrics,
     pendingRequests: pendingRequests
   };
 }
@@ -2327,14 +2325,16 @@ function updateReportingLine(adminEmail, userEmail, newSupervisorEmail) {
   return `${userName} has been successfully reassigned to ${newSupervisorName}.`;
 }
 
+// [START] MODIFICATION 2: Replace _ONE_TIME_FIX_TEMPLATE
 /**
  * ==========================================================
  * ONE-TIME MIGRATION SCRIPT
  * Run this function ONCE from the Apps Script editor
  * to build your main template in the Google Sheet.
+ * It will only run if the sheet is empty.
  * ==========================================================
  */
-function _ONE_TIME_FIX_TEMPLATE() {
+function _SETUP_DEFAULT_TEMPLATE() {
   // This data is from your original hard-coded 'qualityCategories' variable
   const qualityCategories = [
     { 
@@ -2396,6 +2396,12 @@ function _ONE_TIME_FIX_TEMPLATE() {
   const ss = getSpreadsheet();
   const templateSheet = getOrCreateSheet(ss, SHEET_NAMES.coachingTemplates);
   
+  // *** NEW CHECK: Only run if the sheet is empty (has 1 row - the header) ***
+  if (templateSheet.getLastRow() > 1) {
+    Logger.log("CoachingTemplates sheet is not empty. Skipping default template setup.");
+    return;
+  }
+  
   // 1. Clear all old data (but not the header row)
   templateSheet.getRange(2, 1, templateSheet.getLastRow(), 4).clearContent();
   
@@ -2421,3 +2427,4 @@ function _ONE_TIME_FIX_TEMPLATE() {
   
   Logger.log(`Migration complete! Added ${newRows.length} criteria for 'Main Template'.`);
 }
+// [END] MODIFICATION 2
