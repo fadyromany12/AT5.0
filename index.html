@@ -2244,10 +2244,20 @@
         return str.trim();
       }
       
-      // --- NEW Helper to format seconds with color for Dashboard ---
+      // [START] MODIFICATION 14: Replace getStatusClass
       function getStatusClass(status) {
           // Converts status string to CSS class format
-          return status.replace(/[\s\/-]/g, '-');
+          const formatted = status.replace(/[\s\/-]/g, '-');
+          
+          if (formatted === 'Not-Scheduled') {
+              return 'Pending-Login'; // Reuse yellow style
+          }
+          // Fallback for any leave types that weren't grouped
+          if (['Sick', 'Annual', 'Casual'].includes(formatted)) {
+              return 'On-Leave';
+          }
+          
+          return formatted;
       }
 
       function formatColoredSeconds(seconds, isPositive) {
@@ -2294,6 +2304,7 @@
       
       // --- === `populateMyRequests` ---
       function populateMyRequests(requests) {
+        console.log("Data for My Requests:", requests); // <-- ADD THIS LINE
         const listDiv = document.getElementById('my-requests-list');
         
         if (!Array.isArray(requests)) {
@@ -2312,7 +2323,10 @@
           if (req.status === 'Pending') statusClass = 'status-pending';
           if (req.status === 'Approved') statusClass = 'status-approved';
           if (req.status === 'Denied') statusClass = 'status-denied';
-          
+          let actionHtml = '';
+          if (req.status === 'Approved' || req.status === 'Denied') {
+            actionHtml = `<p><strong>Action:</strong> ${req.status} by ${req.actionBy || 'N/A'} on ${formatDate(req.actionDate)}</p>`;
+          }
           html += `
             <div class="request-list-item">
               <div class="item-details">
@@ -3338,25 +3352,18 @@
         const statusAgentDiv = document.getElementById('status-agent-list');
         let statusHtml = '';
         
-        if (!data.statusCounts || data.statusCounts.length === 0) {
+        if (!data.agentStatusList || data.agentStatusList.length === 0) {
              statusHtml = '<p class="text-color-secondary">No user status information available for this date/team.</p>';
         } else {
-             // Filter out statuses with 0 count and format the HTML
-             const statusDistribution = data.statusCounts.map(s => ({ status: s[0], count: s[1] })).filter(s => s.count > 0);
-             
-             if (statusDistribution.length === 0) {
-                 statusHtml = '<p class="text-color-secondary">All scheduled users are accounted for (0 currently live).</p>';
-             } else {
-                  statusDistribution.forEach(dist => {
-                      const statusClass = getStatusClass(dist.status);
-                      statusHtml += `
-                          <div class="agent-status-item">
-                              <strong>${dist.status}</strong>
-                              <span class="status-tag status-${statusClass}">${dist.count} Agent(s)</span>
-                          </div>
-                      `;
-                  });
-             }
+             data.agentStatusList.forEach(agent => {
+                  const statusClass = getStatusClass(agent.status);
+                  statusHtml += `
+                      <div class="agent-status-item">
+                          <strong>${agent.name}</strong>
+                          <span class="status-tag status-${statusClass}">${agent.status}</span>
+                      </div>
+                  `;
+             });
         }
         statusAgentDiv.innerHTML = statusHtml;
 
